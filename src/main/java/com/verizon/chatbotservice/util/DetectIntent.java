@@ -1,11 +1,17 @@
 package com.verizon.chatbotservice.util;
 
+import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.api.gax.core.FixedCredentialsProvider;
+import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.dialogflow.v2.AudioEncoding;
 import com.google.cloud.dialogflow.v2.DetectIntentRequest;
 import com.google.cloud.dialogflow.v2.DetectIntentResponse;
@@ -14,15 +20,16 @@ import com.google.cloud.dialogflow.v2.QueryInput;
 import com.google.cloud.dialogflow.v2.QueryResult;
 import com.google.cloud.dialogflow.v2.SessionName;
 import com.google.cloud.dialogflow.v2.SessionsClient;
+import com.google.cloud.dialogflow.v2.SessionsSettings;
 import com.google.cloud.dialogflow.v2.TextInput;
 import com.google.cloud.dialogflow.v2.TextInput.Builder;
 import com.google.protobuf.ByteString;
-import com.verizon.chatbotservice.service.MessageListener;
+import com.google.protobuf.Value;
+import com.verizon.chatbotservice.dto.DialogFlowResponse;
 
 public class DetectIntent {
-	
-	private static final Logger log = LoggerFactory.getLogger(DetectIntent.class);
 
+	private static final Logger log = LoggerFactory.getLogger(DetectIntent.class);
 
 	/**
 	 * Returns the result of detect intent with texts as inputs.
@@ -108,6 +115,33 @@ public class DetectIntent {
 			System.out.format("Query Text: '%s'\n", queryResult.getQueryText());
 			System.out.format("Detected Intent: %s (confidence: %f)\n", queryResult.getIntent().getDisplayName(), queryResult.getIntentDetectionConfidence());
 			System.out.format("Fulfillment Text: '%s'\n", queryResult.getFulfillmentText());
+		}
+	}
+
+	public static DialogFlowResponse detectIntent(String text) throws Exception {
+		GoogleCredentials credentials = GoogleCredentials.fromStream(new FileInputStream("/usr/local/dialogflow/testagent-7edbe-2b6ea9ccd971.json"));
+		SessionsSettings.Builder sessionBuilder = SessionsSettings.newBuilder();
+		SessionsSettings sessionSetting = sessionBuilder.setCredentialsProvider(FixedCredentialsProvider.create(credentials)).build();
+		try (SessionsClient sessionsClient = SessionsClient.create(sessionSetting)) {
+			SessionName session = SessionName.of(ApplicationConstant.DIALOG_FLOW_AGENT, UUID.randomUUID().toString());
+			log.info("Session Path: " + session.toString());
+			Builder textInput = TextInput.newBuilder().setText(text).setLanguageCode("en-us");
+			QueryInput queryInput = QueryInput.newBuilder().setText(textInput).build();
+			DetectIntentResponse response = sessionsClient.detectIntent(session, queryInput);
+			QueryResult queryResult = response.getQueryResult();
+			log.info("====================>> " + queryResult);
+			Map<String, Object> parameters = new HashMap<String, Object>();
+			Map<String, Value> parMap = queryResult.getParameters().getFieldsMap();
+			for (String key : parMap.keySet()) {
+				String val = parMap.get(key).getStringValue();
+				if (val != null && !val.isEmpty()) {
+					parameters.put(key, val);
+				} else {
+					parameters.put(key, parMap.get(key).getNumberValue());
+				}
+			}
+
+			return new DialogFlowResponse(queryResult.getQueryText(), queryResult.getAction(), parameters, queryResult.getFulfillmentText(), queryResult.getIntent().getDisplayName(), queryResult.getIntentDetectionConfidence(), queryResult.getLanguageCode());
 		}
 	}
 
